@@ -4,8 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Vraie ou fausse fleur ?</title>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;700;800&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#eef3ea;--surface:#fbfdf9;--ink:#1f3a2b;--muted:#587060;--accent:#b8306f;--on-accent:#fff;--ok:#2f7d4f;--bad:#b3261e;--line:#c9d8c6;
@@ -57,7 +56,6 @@ ul.names li{padding:6px 14px;border-radius:999px}
     <p id="lobbyMsg"></p>
     <ul class="names" id="names"></ul>
     <button class="btn" id="launch" hidden>Lancer pour tous</button>
-    <button class="btn" id="clear" hidden style="background:var(--surface);color:var(--ink);border:2px solid var(--line)">Vider la liste</button>
   </section>
 
   <section id="sGame" hidden>
@@ -75,75 +73,77 @@ ul.names li{padding:6px 14px;border-radius:999px}
     <button class="btn" id="again" hidden>Relancer pour tous</button>
   </section>
 </main>
-<script>
-(function(){
-/* ====== À REMPLIR : configuration Firebase (voir les instructions) ====== */
-var FIREBASE_CONFIG={
-  apiKey:"VOTRE_API_KEY",
-  authDomain:"VOTRE_PROJET.firebaseapp.com",
-  databaseURL:"https://VOTRE_PROJET-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId:"VOTRE_PROJET"
-};
-/* Code secret de l'animateur : ouvre la page avec ?host=CE_CODE pour voir le bouton « Lancer pour tous » */
+<script>(function(){
+/* Nom du salon (identifiant unique sur le réseau PeerJS) : change-le pour éviter de croiser d'autres parties */
+var ROOM="fleurs-quiz-k7x93";
+/* Code animateur : ouvre la page avec ?host=CE_CODE */
 var HOST_CODE="fleurs";
-/* ======================================================================= */
-
 var REAL=["rose","tulipe","pivoine","myosotis","coquelicot","tournesol","marguerite","pâquerette","lavande","jonquille","narcisse","iris","bleuet","capucine","hortensia","glycine","camélia","dahlia","œillet","muguet","violette","anémone","primevère","jacinthe","clématite","pensée","gentiane","magnolia"];
 var FAKE=["glaïeuline","pétunelle","marguerolle","tulipane","camélie","azaliette","orchidelle","bleuvet","jasmuline","pivoinelle","rosélie","myosotine","tournesolia","hortensine","clématine","anémonelle","primevelle","narcissole","glycinelle","dahlienne","lavandelle","violetine","capucinelle","jonquillane"];
+
 function $(id){return document.getElementById(id)}
 function show(id){["sName","sLobby","sGame","sEnd"].forEach(function(s){$(s).hidden=(s!==id)})}
 function rng(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
 function shuf(arr,R){arr=arr.slice();for(var i=arr.length-1;i>0;i--){var j=Math.floor(R()*(i+1));var t=arr[i];arr[i]=arr[j];arr[j]=t}return arr}
-var db=null,uid=null,host=false,name="",gstate=null,lastRound=null,playing=false,curRound=0,players=[],result=null;
+var host=new URLSearchParams(location.search).get("host")===HOST_CODE;
+var peer=null,hostConn=null,conns={},players={},results={},lobbyList=[],ranking=[],round=0,playing=false,curRound=0,name="",result=null;
 var stage=$("stage"),scoreEl=$("score");
-host=new URLSearchParams(location.search).get("host")===HOST_CODE;
-try{
-  if(FIREBASE_CONFIG.apiKey==="VOTRE_API_KEY")throw 0;
-  firebase.initializeApp(FIREBASE_CONFIG);db=firebase.database();
-}catch(e){
-  $("nameInfo").textContent="Configuration Firebase manquante : remplis FIREBASE_CONFIG au début du script.";$("nameIn").disabled=true;db=null;
-}
-try{uid=localStorage.getItem("fleurs_id");if(!uid){uid="p"+Math.random().toString(36).slice(2,10);localStorage.setItem("fleurs_id",uid)}}catch(e){uid="p"+Math.random().toString(36).slice(2,10)}
+if(host){$("join").textContent="Ouvrir le salon";$("nameInfo").textContent="Tu es l’animateur. Entre ton nom et garde cet onglet ouvert pendant toute la partie : c’est lui qui relie les joueurs."}
 try{var sv=localStorage.getItem("fleurs_nom");if(sv)$("nameIn").value=sv}catch(e){}
-$("join").disabled=!db||!$("nameIn").value.trim();
-$("nameIn").addEventListener("input",function(){$("join").disabled=!db||!$("nameIn").value.trim()});
-
+$("join").disabled=!$("nameIn").value.trim();
+$("nameIn").addEventListener("input",function(){$("join").disabled=!$("nameIn").value.trim()});
+function err(m){var e=$("nameErr");e.hidden=false;e.textContent=m;$("join").disabled=false}
 $("join").addEventListener("click",function(){
-  name=$("nameIn").value.trim().slice(0,20);if(!name||!db)return;
+  name=$("nameIn").value.trim().slice(0,20);if(!name)return;
   try{localStorage.setItem("fleurs_nom",name)}catch(e){}
-  $("join").disabled=true;
-  db.ref("players/"+uid).set({name:name,round:0}).then(function(){
-    show("sLobby");
-    db.ref("game").on("value",function(s){onState(s.val())});
-    db.ref("players").on("value",function(s){
-      var v=s.val()||{};players=Object.keys(v).map(function(k){var o=v[k];o.id=k;return o});
-      renderLobby();if(!$("sEnd").hidden)renderRank();
-    });
-  }).catch(function(){$("join").disabled=false;var m=$("nameErr");m.hidden=false;m.textContent="Impossible de rejoindre : vérifie les règles de la base Firebase."});
+  $("join").disabled=true;$("nameErr").hidden=true;
+  host?startHost():startPlayer();
 });
-function onState(d){
-  var r=d?d.round:0;
-  if(lastRound===null){lastRound=r}
-  else if(d&&d.status==="running"&&r>lastRound){lastRound=r;if(!playing)beginRound(d)}
-  gstate=d;renderLobby();
+function broadcast(m){Object.keys(conns).forEach(function(k){try{conns[k].send(m)}catch(e){}})}
+function broadcastPlayers(){lobbyList=Object.keys(players).map(function(k){return players[k]});renderLobby();broadcast({t:"players",list:lobbyList})}
+function broadcastRank(){ranking=Object.keys(results).map(function(k){return results[k]});broadcast({t:"rank",list:ranking});if(!$("sEnd").hidden)renderRank()}
+function startHost(){
+  peer=new Peer(ROOM);
+  peer.on("error",function(e){err(e.type==="unavailable-id"?"Un salon est déjà ouvert avec ce nom (un autre onglet animateur ?). Attends une minute ou change ROOM.":"Connexion impossible ("+e.type+")")});
+  peer.on("open",function(){players.host=name;show("sLobby");broadcastPlayers()});
+  peer.on("connection",function(c){
+    c.on("data",function(m){
+      if(m.t==="join"){conns[c.peer]=c;players[c.peer]=String(m.name||"?").slice(0,20);broadcastPlayers()}
+      else if(m.t==="result"){results[c.peer]={name:String(m.name||"?").slice(0,20),score:+m.score||0};broadcastRank()}
+    });
+    c.on("close",function(){delete conns[c.peer];delete players[c.peer];broadcastPlayers()});
+  });
+}
+function startPlayer(){
+  peer=new Peer();
+  peer.on("error",function(e){err(e.type==="peer-unavailable"?"Le salon n’est pas ouvert : l’animateur doit d’abord ouvrir la page animateur.":"Connexion impossible ("+e.type+")")});
+  peer.on("open",function(){
+    hostConn=peer.connect(ROOM,{reliable:true});
+    hostConn.on("open",function(){hostConn.send({t:"join",name:name});show("sLobby");renderLobby()});
+    hostConn.on("data",function(m){
+      if(m.t==="players"){lobbyList=m.list;renderLobby()}
+      else if(m.t==="start"){if(!playing)beginRound(m)}
+      else if(m.t==="rank"){ranking=m.list;if(!$("sEnd").hidden)renderRank()}
+    });
+    hostConn.on("close",function(){$("lobbyMsg").textContent="Connexion avec l’animateur perdue. Recharge la page.";$("again").hidden=true});
+  });
 }
 function renderLobby(){
   var ul=$("names");ul.textContent="";
-  players.forEach(function(p){var li=document.createElement("li");li.textContent=p.name||"?";ul.appendChild(li)});
-  $("lobbyMsg").textContent=players.length+" inscrit"+(players.length>1?"s":"")+". "+(host?"Lance la manche quand tout le monde est là : elle démarre en même temps pour tous.":"En attente de l’animateur, la manche démarre toute seule pour tout le monde.");
-  $("launch").hidden=!host;$("clear").hidden=!host;
+  lobbyList.forEach(function(n){var li=document.createElement("li");li.textContent=n;ul.appendChild(li)});
+  $("lobbyMsg").textContent=lobbyList.length+" inscrit"+(lobbyList.length>1?"s":"")+". "+(host?"Lance la manche quand tout le monde est là : elle démarre en même temps pour tous.":"En attente de l’animateur, la manche démarre toute seule pour tout le monde.");
+  $("launch").hidden=!host;
 }
 function launch(){
-  var r=(gstate?gstate.round:0)+1;
-  db.ref("game").set({status:"running",round:r,seed:Math.floor(Math.random()*2147483647)});
+  if(playing)return;
+  results={};ranking=[];round++;
+  var m={t:"start",round:round,seed:Math.floor(Math.random()*2147483647)};
+  broadcast(m);beginRound(m);
 }
 $("launch").addEventListener("click",launch);
 $("again").addEventListener("click",launch);
-$("clear").addEventListener("click",function(){
-  var upd={};players.forEach(function(p){if(p.id!==uid)upd[p.id]=null});db.ref("players").update(upd);
-});
 
-var words,times,xs,active,spawned,score,good,wrong,missed,t0,raf,running,next;
+var words,times,xs,active,spawned,score,good,wrong,missed,t0,raf,running,last=0;
 function beginRound(d){
   playing=true;curRound=d.round;result=null;
   var R=rng(d.seed);
@@ -155,8 +155,7 @@ function beginRound(d){
   Array.prototype.slice.call(stage.querySelectorAll(".w")).forEach(function(e){e.remove()});
   show("sGame");
   var cd=$("cd"),n=3;cd.hidden=false;cd.textContent=n;
-  (function step(){n--;if(n>0){cd.textContent=n;setTimeout(step,1000)}else{setTimeout(function(){cd.hidden=true;running=true;t0=performance.now();raf=requestAnimationFrame(tick)},1000);cd.textContent="Go !"}})();
-  setTimeout(function(){},0);
+  (function step(){n--;if(n>0){cd.textContent=n;setTimeout(step,1000)}else{cd.textContent="Go !";setTimeout(function(){cd.hidden=true;running=true;last=0;t0=performance.now();raf=requestAnimationFrame(tick)},1000)}})();
 }
 function spawn(){
   var i=spawned++,w=words[i];
@@ -172,7 +171,6 @@ function hit(o){
   if(o.w.real){good++;score+=20;o.el.classList.add("ok")}else{wrong++;score-=10;o.el.classList.add("bad")}
   scoreEl.textContent=score;setTimeout(function(){o.el.remove()},350);
 }
-var last=0;
 function tick(t){
   if(!running)return;
   var dt=Math.min(.05,(t-(last||t))/1000);last=t;var el=t-t0;
@@ -188,9 +186,10 @@ function tick(t){
   raf=requestAnimationFrame(tick);
 }
 function finish(){
-  running=false;last=0;cancelAnimationFrame(raf);
-  result={name:name,round:curRound,score:score,good:good,wrong:wrong,missed:missed.length};
-  db.ref("players/"+uid).set(result);
+  running=false;cancelAnimationFrame(raf);
+  result={name:name,score:score};
+  if(host){results.host=result;broadcastRank()}
+  else if(hostConn){try{hostConn.send({t:"result",name:name,score:score})}catch(e){}}
   $("final").textContent=score+" pts";
   $("stats").innerHTML="<div>"+good+" <span>trouvées</span></div><div>"+wrong+" <span>faux cliqués</span></div><div>"+missed.length+" <span>manquées</span></div>";
   $("missed").textContent=missed.length?"Tu as laissé passer : "+missed.join(", ")+".":"Aucune vraie fleur oubliée, bravo !";
@@ -200,12 +199,12 @@ function finish(){
 }
 function renderRank(){
   var ol=$("rank");ol.textContent="";
-  var list=players.filter(function(p){return p.round===curRound&&typeof p.score==="number"});
-  if(result&&!list.some(function(p){return p.id===uid})){var me=result;me.id=uid;list.push(me)}
+  var list=ranking.slice();
+  if(result&&!list.some(function(p){return p.name===result.name&&p.score===result.score}))list.push(result);
   list.sort(function(a,b){return b.score-a.score});
   list.forEach(function(p,i){
-    var li=document.createElement("li");if(p.id===uid)li.className="me";
-    var a=document.createElement("span");a.textContent=(i+1)+". "+(p.name||"?");
+    var li=document.createElement("li");if(result&&p.name===result.name&&p.score===result.score)li.className="me";
+    var a=document.createElement("span");a.textContent=(i+1)+". "+p.name;
     var b=document.createElement("span");b.textContent=p.score+" pts";
     li.appendChild(a);li.appendChild(b);ol.appendChild(li);
   });
