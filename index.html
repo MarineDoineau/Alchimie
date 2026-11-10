@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vraie ou fausse fleur ?</title>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#eef3ea;--surface:#fbfdf9;--ink:#1f3a2b;--muted:#587060;--accent:#b8306f;--on-accent:#fff;--ok:#2f7d4f;--bad:#b3261e;--line:#c9d8c6;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14231b;--surface:#1d3126;--ink:#e6f0e4;--muted:#9bb3a2;--accent:#f06fa5;--on-accent:#2a0b19;--ok:#6fcf97;--bad:#ff8a80;--line:#2f4a3a}}
+:root[data-theme="dark"]{--bg:#14231b;--surface:#1d3126;--ink:#e6f0e4;--muted:#9bb3a2;--accent:#f06fa5;--on-accent:#2a0b19;--ok:#6fcf97;--bad:#ff8a80;--line:#2f4a3a}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh;display:flex;justify-content:center}
+main{width:100%;max-width:640px;padding:20px 16px 28px;display:flex;flex-direction:column;gap:14px}
+h1{font-size:clamp(2rem,8vw,3rem);line-height:1.02;margin:0;font-weight:800;letter-spacing:-.02em}
+p{margin:0;line-height:1.5;color:var(--muted);max-width:60ch}
+section[hidden]{display:none}
+section{display:flex;flex-direction:column;gap:14px}
+.hud{font-weight:700;font-size:1.05rem}
+input{font:inherit;font-size:1.1rem;padding:12px 16px;border-radius:14px;border:2px solid var(--line);background:var(--surface);color:var(--ink);width:100%;max-width:360px}
+input:focus-visible,.btn:focus-visible,.w:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.btn{align-self:flex-start;background:var(--accent);color:var(--on-accent);border:0;border-radius:999px;font:inherit;font-weight:800;font-size:1.1rem;padding:13px 28px;cursor:pointer}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+#stage{position:relative;height:min(62vh,520px);min-height:340px;background:var(--surface);border:2px solid var(--line);border-radius:22px;overflow:hidden}
+.w{position:absolute;top:0;left:0;border:2px solid var(--ink);background:var(--bg);color:var(--ink);font:inherit;font-weight:700;font-size:1.15rem;padding:8px 16px;border-radius:999px;cursor:pointer;white-space:nowrap;will-change:transform}
+.w.ok{background:var(--ok);border-color:var(--ok);color:var(--surface);pointer-events:none}
+.w.bad{background:var(--bad);border-color:var(--bad);color:var(--surface);pointer-events:none}
+#cd{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:var(--surface);font-size:7rem;font-weight:800;color:var(--accent)}
+#cd[hidden]{display:none}
+.big{font-size:clamp(2.6rem,12vw,4rem);font-weight:800;line-height:1}
+.stats{display:flex;gap:18px;flex-wrap:wrap;font-weight:700}
+.stats span{color:var(--muted);font-weight:400}
+ol.rank,ul.names{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;max-width:420px}
+ol.rank li,ul.names li{display:flex;justify-content:space-between;gap:12px;padding:10px 16px;border-radius:14px;background:var(--surface);border:2px solid var(--line);font-weight:700}
+ol.rank li.me{border-color:var(--accent)}
+ul.names{flex-direction:row;flex-wrap:wrap;max-width:none}
+ul.names li{padding:6px 14px;border-radius:999px}
+.err{color:var(--bad);font-weight:700}
+</style>
+</head>
+<body>
+<main>
+  <h1>Vraie ou fausse fleur&#8239;?</h1>
+
+  <section id="sName">
+    <p id="nameInfo">Entre ton nom pour rejoindre la partie. Tout le monde joue en même temps, la manche démarre quand l’animateur la lance.</p>
+    <input id="nameIn" maxlength="20" placeholder="Ton nom" autocomplete="nickname">
+    <button class="btn" id="join" disabled>Rejoindre</button>
+    <p class="err" id="nameErr" hidden></p>
+  </section>
+
+  <section id="sLobby" hidden>
+    <p id="lobbyMsg"></p>
+    <ul class="names" id="names"></ul>
+    <button class="btn" id="launch" hidden>Lancer pour tous</button>
+    <button class="btn" id="clear" hidden style="background:var(--surface);color:var(--ink);border:2px solid var(--line)">Vider la liste</button>
+  </section>
+
+  <section id="sGame" hidden>
+    <div class="hud" aria-live="polite">Score : <span id="score">0</span></div>
+    <div id="stage"><div id="cd" hidden></div></div>
+  </section>
+
+  <section id="sEnd" hidden>
+    <div class="big" id="final"></div>
+    <div class="stats" id="stats"></div>
+    <p id="missed"></p>
+    <h2 style="margin:6px 0 0;font-size:1.4rem">Classement</h2>
+    <ol class="rank" id="rank"></ol>
+    <p id="endMsg"></p>
+    <button class="btn" id="again" hidden>Relancer pour tous</button>
+  </section>
+</main>
+<script>
+(function(){
+/* ====== À REMPLIR : configuration Firebase (voir les instructions) ====== */
+var FIREBASE_CONFIG={
+  apiKey:"VOTRE_API_KEY",
+  authDomain:"VOTRE_PROJET.firebaseapp.com",
+  databaseURL:"https://VOTRE_PROJET-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId:"VOTRE_PROJET"
+};
+/* Code secret de l'animateur : ouvre la page avec ?host=CE_CODE pour voir le bouton « Lancer pour tous » */
+var HOST_CODE="fleurs";
+/* ======================================================================= */
+
+var REAL=["rose","tulipe","pivoine","myosotis","coquelicot","tournesol","marguerite","pâquerette","lavande","jonquille","narcisse","iris","bleuet","capucine","hortensia","glycine","camélia","dahlia","œillet","muguet","violette","anémone","primevère","jacinthe","clématite","pensée","gentiane","magnolia"];
+var FAKE=["glaïeuline","pétunelle","marguerolle","tulipane","camélie","azaliette","orchidelle","bleuvet","jasmuline","pivoinelle","rosélie","myosotine","tournesolia","hortensine","clématine","anémonelle","primevelle","narcissole","glycinelle","dahlienne","lavandelle","violetine","capucinelle","jonquillane"];
+function $(id){return document.getElementById(id)}
+function show(id){["sName","sLobby","sGame","sEnd"].forEach(function(s){$(s).hidden=(s!==id)})}
+function rng(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function shuf(arr,R){arr=arr.slice();for(var i=arr.length-1;i>0;i--){var j=Math.floor(R()*(i+1));var t=arr[i];arr[i]=arr[j];arr[j]=t}return arr}
+var db=null,uid=null,host=false,name="",gstate=null,lastRound=null,playing=false,curRound=0,players=[],result=null;
+var stage=$("stage"),scoreEl=$("score");
+host=new URLSearchParams(location.search).get("host")===HOST_CODE;
+try{
+  if(FIREBASE_CONFIG.apiKey==="VOTRE_API_KEY")throw 0;
+  firebase.initializeApp(FIREBASE_CONFIG);db=firebase.database();
+}catch(e){
+  $("nameInfo").textContent="Configuration Firebase manquante : remplis FIREBASE_CONFIG au début du script.";$("nameIn").disabled=true;db=null;
+}
+try{uid=localStorage.getItem("fleurs_id");if(!uid){uid="p"+Math.random().toString(36).slice(2,10);localStorage.setItem("fleurs_id",uid)}}catch(e){uid="p"+Math.random().toString(36).slice(2,10)}
+try{var sv=localStorage.getItem("fleurs_nom");if(sv)$("nameIn").value=sv}catch(e){}
+$("join").disabled=!db||!$("nameIn").value.trim();
+$("nameIn").addEventListener("input",function(){$("join").disabled=!db||!$("nameIn").value.trim()});
+
+$("join").addEventListener("click",function(){
+  name=$("nameIn").value.trim().slice(0,20);if(!name||!db)return;
+  try{localStorage.setItem("fleurs_nom",name)}catch(e){}
+  $("join").disabled=true;
+  db.ref("players/"+uid).set({name:name,round:0}).then(function(){
+    show("sLobby");
+    db.ref("game").on("value",function(s){onState(s.val())});
+    db.ref("players").on("value",function(s){
+      var v=s.val()||{};players=Object.keys(v).map(function(k){var o=v[k];o.id=k;return o});
+      renderLobby();if(!$("sEnd").hidden)renderRank();
+    });
+  }).catch(function(){$("join").disabled=false;var m=$("nameErr");m.hidden=false;m.textContent="Impossible de rejoindre : vérifie les règles de la base Firebase."});
+});
+function onState(d){
+  var r=d?d.round:0;
+  if(lastRound===null){lastRound=r}
+  else if(d&&d.status==="running"&&r>lastRound){lastRound=r;if(!playing)beginRound(d)}
+  gstate=d;renderLobby();
+}
+function renderLobby(){
+  var ul=$("names");ul.textContent="";
+  players.forEach(function(p){var li=document.createElement("li");li.textContent=p.name||"?";ul.appendChild(li)});
+  $("lobbyMsg").textContent=players.length+" inscrit"+(players.length>1?"s":"")+". "+(host?"Lance la manche quand tout le monde est là : elle démarre en même temps pour tous.":"En attente de l’animateur, la manche démarre toute seule pour tout le monde.");
+  $("launch").hidden=!host;$("clear").hidden=!host;
+}
+function launch(){
+  var r=(gstate?gstate.round:0)+1;
+  db.ref("game").set({status:"running",round:r,seed:Math.floor(Math.random()*2147483647)});
+}
+$("launch").addEventListener("click",launch);
+$("again").addEventListener("click",launch);
+$("clear").addEventListener("click",function(){
+  var upd={};players.forEach(function(p){if(p.id!==uid)upd[p.id]=null});db.ref("players").update(upd);
+});
+
+var words,times,xs,active,spawned,score,good,wrong,missed,t0,raf,running,next;
+function beginRound(d){
+  playing=true;curRound=d.round;result=null;
+  var R=rng(d.seed);
+  var real=shuf(REAL,R).slice(0,18).map(function(n){return{n:n,real:true}});
+  var fake=shuf(FAKE,R).slice(0,12).map(function(n){return{n:n,real:false}});
+  words=shuf(real.concat(fake),R);xs=[];times=[];var t=600;
+  for(var i=0;i<words.length;i++){xs.push(R());times.push(t);t+=(700+R()*400)/(1+i*0.08)}
+  active=[];spawned=0;score=0;good=0;wrong=0;missed=[];scoreEl.textContent="0";
+  Array.prototype.slice.call(stage.querySelectorAll(".w")).forEach(function(e){e.remove()});
+  show("sGame");
+  var cd=$("cd"),n=3;cd.hidden=false;cd.textContent=n;
+  (function step(){n--;if(n>0){cd.textContent=n;setTimeout(step,1000)}else{setTimeout(function(){cd.hidden=true;running=true;t0=performance.now();raf=requestAnimationFrame(tick)},1000);cd.textContent="Go !"}})();
+  setTimeout(function(){},0);
+}
+function spawn(){
+  var i=spawned++,w=words[i];
+  var el=document.createElement("button");el.type="button";el.className="w";el.textContent=w.n;stage.appendChild(el);
+  var x=8+xs[i]*Math.max(0,stage.clientWidth-el.offsetWidth-16);
+  var o={el:el,w:w,x:x,y:-el.offsetHeight,done:false,k:1+i*0.08};
+  el.style.transform="translate("+x+"px,"+o.y+"px)";
+  el.addEventListener("click",function(){hit(o)});
+  active.push(o);
+}
+function hit(o){
+  if(o.done||!running)return;o.done=true;
+  if(o.w.real){good++;score+=20;o.el.classList.add("ok")}else{wrong++;score-=10;o.el.classList.add("bad")}
+  scoreEl.textContent=score;setTimeout(function(){o.el.remove()},350);
+}
+var last=0;
+function tick(t){
+  if(!running)return;
+  var dt=Math.min(.05,(t-(last||t))/1000);last=t;var el=t-t0;
+  while(spawned<words.length&&el>=times[spawned])spawn();
+  var H=stage.clientHeight,v=H/4.8;
+  active=active.filter(function(o){
+    if(o.done)return false;
+    o.y+=v*o.k*dt;o.el.style.transform="translate("+o.x+"px,"+o.y+"px)";
+    if(o.y>H){o.done=true;o.el.remove();if(o.w.real){missed.push(o.w.n);score-=10;scoreEl.textContent=score}return false}
+    return true;
+  });
+  if(spawned>=words.length&&active.length===0){finish();return}
+  raf=requestAnimationFrame(tick);
+}
+function finish(){
+  running=false;last=0;cancelAnimationFrame(raf);
+  result={name:name,round:curRound,score:score,good:good,wrong:wrong,missed:missed.length};
+  db.ref("players/"+uid).set(result);
+  $("final").textContent=score+" pts";
+  $("stats").innerHTML="<div>"+good+" <span>trouvées</span></div><div>"+wrong+" <span>faux cliqués</span></div><div>"+missed.length+" <span>manquées</span></div>";
+  $("missed").textContent=missed.length?"Tu as laissé passer : "+missed.join(", ")+".":"Aucune vraie fleur oubliée, bravo !";
+  $("again").hidden=!host;
+  $("endMsg").textContent=host?"Quand tout le monde a fini, relance une manche pour tous.":"Le classement se met à jour quand les autres terminent. L’animateur peut relancer une manche.";
+  playing=false;show("sEnd");renderRank();
+}
+function renderRank(){
+  var ol=$("rank");ol.textContent="";
+  var list=players.filter(function(p){return p.round===curRound&&typeof p.score==="number"});
+  if(result&&!list.some(function(p){return p.id===uid})){var me=result;me.id=uid;list.push(me)}
+  list.sort(function(a,b){return b.score-a.score});
+  list.forEach(function(p,i){
+    var li=document.createElement("li");if(p.id===uid)li.className="me";
+    var a=document.createElement("span");a.textContent=(i+1)+". "+(p.name||"?");
+    var b=document.createElement("span");b.textContent=p.score+" pts";
+    li.appendChild(a);li.appendChild(b);ol.appendChild(li);
+  });
+}
+})();
+</script>
+</body>
+</html>
