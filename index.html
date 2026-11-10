@@ -25,7 +25,8 @@ input:focus-visible,.btn:focus-visible,.w:focus-visible{outline:3px solid var(--
 .btn{align-self:flex-start;background:var(--accent);color:var(--on-accent);border:0;border-radius:999px;font:inherit;font-weight:800;font-size:1.1rem;padding:13px 28px;cursor:pointer}
 .btn[disabled]{opacity:.45;cursor:not-allowed}
 #stage{position:relative;height:min(62vh,520px);min-height:340px;background:var(--surface);border:2px solid var(--line);border-radius:22px;overflow:hidden}
-.w{position:absolute;top:0;left:0;border:2px solid var(--ink);background:var(--bg);color:var(--ink);font:inherit;font-weight:700;font-size:1.15rem;padding:8px 16px;border-radius:999px;cursor:pointer;white-space:nowrap;will-change:transform}
+.w{position:absolute;top:0;left:0;border:2px solid var(--ink);background:var(--bg);color:var(--ink);font:inherit;font-weight:700;font-size:1.15rem;padding:8px 16px;border-radius:999px;cursor:pointer;white-space:nowrap;will-change:transform;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent}
+.w::after{content:"";position:absolute;inset:-6px}
 .w.ok{background:var(--ok);border-color:var(--ok);color:var(--surface);pointer-events:none}
 .w.bad{background:var(--bad);border-color:var(--bad);color:var(--surface);pointer-events:none}
 #cd{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:var(--surface);font-size:7rem;font-weight:800;color:var(--accent)}
@@ -170,7 +171,7 @@ function spawn(){
   var el=document.createElement("button");el.type="button";el.className="w";el.textContent=w.n;stage.appendChild(el);
   var x=8+xs[i]*Math.max(0,stage.clientWidth-el.offsetWidth-16);
   var o={el:el,w:w,x:x,S:S[i],h:el.offsetHeight,y:0,done:false};
-  el.addEventListener("click",function(){hit(o)});
+  el.addEventListener("pointerdown",function(ev){ev.preventDefault();hit(o)});
   active.push(o);
 }
 function hit(o){
