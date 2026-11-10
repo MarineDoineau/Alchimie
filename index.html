@@ -90,7 +90,7 @@ function rng(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15
 function shuf(arr,R){arr=arr.slice();for(var i=arr.length-1;i>0;i--){var j=Math.floor(R()*(i+1));var t=arr[i];arr[i]=arr[j];arr[j]=t}return arr}
 var host=new URLSearchParams(location.search).get("host")===HOST_CODE;
 var cid="c"+Math.random().toString(36).slice(2,10);
-var client=null,bi=0,joined=false,pres={},ress={},lastRound=0,launchedAt=0,curSeed=0,curRound=0,playing=false,name="",result=null,hb=null;
+var client=null,bi=0,joined=false,pres={},ress={},lastRound=0,launchedAt=0,curSeed=0,curRound=0,playing=false,name="",result=null,hb=null,pt=null;
 var stage=$("stage"),scoreEl=$("score");
 if(host){$("join").textContent="Ouvrir le salon";$("nameInfo").textContent="Tu es l’animateur. Entre ton nom, puis lance la manche quand tout le monde est dans le salon."}
 try{var sv=localStorage.getItem("fleurs_nom");if(sv)$("nameIn").value=sv}catch(e){}
@@ -106,8 +106,8 @@ $("join").addEventListener("click",function(){
 });
 function pub(sub,obj,retain){if(client&&client.connected)client.publish(ROOM+"/"+sub,obj===""?"":JSON.stringify(obj),{retain:!!retain,qos:0})}
 function connect(){
-  if(bi>=BROKERS.length){net("Réseau : échec");err("Impossible de joindre le serveur de jeu. Essaie un autre réseau (partage de connexion mobile).");return}
-  var url=BROKERS[bi],failed=false,ok=false;
+  if(bi>=BROKERS.length){if(joined){bi=0;setTimeout(connect,3000);return}net("Réseau : échec");err("Impossible de joindre le serveur de jeu. Essaie un autre réseau (partage de connexion mobile).");return}
+  var url=BROKERS[bi],failed=false,ok=false,lost=false;
   net("Réseau : connexion à "+url.split("/")[2].split(":")[0]+"…");
   function next(){if(failed||ok)return;failed=true;try{client.end(true)}catch(e){}bi++;connect()}
   client=mqtt.connect(url,{clientId:cid,clean:true,connectTimeout:6000,reconnectPeriod:0,keepalive:30,will:{topic:ROOM+"/p/"+cid,payload:"",retain:true,qos:0}});
@@ -117,10 +117,12 @@ function connect(){
     client.subscribe([ROOM+"/ctl",ROOM+"/p/+",ROOM+"/r/+"]);
     pub("p/"+cid,{name:name},true);
     if(!joined){joined=true;show("sLobby");renderLobby()}
+    if(result&&result.round===curRound)pub("r/"+cid,result,true);
+    if(!pt)pt=setInterval(function(){pub("p/"+cid,{name:name},true)},10000);
     if(host&&!hb)hb=setInterval(function(){if(launchedAt)pub("ctl",{t:"state",round:lastRound,seed:curSeed,since:Date.now()-launchedAt})},1000);
   });
   client.on("error",next);
-  client.on("close",function(){if(!ok)next();else net("Réseau : connexion perdue, reconnexion…")});
+  client.on("close",function(){if(!ok){next();return}if(lost)return;lost=true;net("Réseau : connexion perdue, reconnexion…");setTimeout(function(){connect()},1500)});
   client.on("message",function(topic,payload){
     var s=payload.toString(),sub=topic.slice(ROOM.length+1),id;
     if(sub==="ctl"){try{onGo(JSON.parse(s))}catch(e){}}
